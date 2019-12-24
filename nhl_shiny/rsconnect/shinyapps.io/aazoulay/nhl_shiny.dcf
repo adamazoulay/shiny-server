@@ -1,0 +1,12 @@
+name: nhl_shiny
+title: nhl_shiny
+username:
+account: aazoulay
+server: shinyapps.io
+hostUrl: https://api.shinyapps.io/v1
+appId: 1617557
+bundleId: 2688942
+url: https://aazoulay.shinyapps.io/nhl_shiny/
+when: 1577155413.14393
+asMultiple: FALSE
+asStatic: FALSE
