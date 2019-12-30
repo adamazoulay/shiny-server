@@ -1,8 +1,8 @@
 library(shiny)
 library(plotly)
 library(nhlscrape)
-library(MASS)
-
+library(png)
+library(maps)
 
 SetDbPath("nhl.sqlite")
 gids <- QueryDb("SELECT DISTINCT game_id FROM events")[,1]
@@ -132,25 +132,37 @@ server <- function(input, output) {
             )))
 
     } else if (input$plot_type == "Heatmap") {
-      bg <- png::readPNG("images/nhlIceHeat.png")
+      
+      if (events_sql[1] == "") {
+        event_pts <- QueryDb(paste("SELECT DISTINCT coordinates_x,
+                            coordinates_y,
+                            result_description,
+                            about_period,
+                            about_periodTime,
+                            game_id,
+                            result_event FROM events WHERE team_id=", team_id,
+                                                         " AND game_id IN (", gids, ")",
+                                                         " AND result_event IN (", events_sql, ")",
+                                                         sep=""))
+        bg <- png::readPNG("images/nhlIceHeat.png")
+      } else {
+        event_pts <- GetHeatmapCoords(team_id, gids, events_sql)
+        map_path <- getMap(event_pts)
+        bg <- png::readPNG(map_path)
+      }
 
-      event_pts <- GetHeatmapCoords(team_id, gids, events_sql)
-
-      # Generate 2d histogram with the points
-      nbins <- 25
-      x.bin <- seq(floor(min(event_pts$coordinates_x)),
-                   ceiling(max(event_pts$coordinates_x)),
-                   length=nbins)
-      y.bin <- seq(floor(min(event_pts$coordinates_y)),
-                   ceiling(max(event_pts$coordinates_y)),
-                   length=nbins)
-
-      freq <-  as.data.frame(table(findInterval(event_pts$coordinates_x, x.bin),
-                                   findInterval(event_pts$coordinates_y, y.bin)))
-      freq2D <- diag(nbins)*0
-      freq2D[cbind(freq[,1], freq[,2])] <- freq[,3]
-
-      plot_ly(x = x.bin, y = y.bin) %>%
+      plot_ly(event_pts, x = ~coordinates_x, y = ~coordinates_y, color= ~result_event,
+              marker = list(size = 10, line = list(color = 'black', width = 2)),
+              text = ~result_event,
+              hovertemplate = ~paste(
+                "<b>%{text}</b><br><br>",
+                result_description,
+                "<br>Game id: ", game_id,
+                "<br>Period: ", about_period,
+                "<br>Time: ", about_periodTime,
+                "<extra></extra>",
+                sep=""
+              )) %>%
         config(displayModeBar = F) %>%
         layout(
           width = 1000,
@@ -158,7 +170,7 @@ server <- function(input, output) {
           xaxis = xaxis,
           yaxis = yaxis,
           legend = list(orientation = 'h', y=-42.5),
-          showlegend=FALSE,
+          showlegend=TRUE,
           images = list(
             list(source = raster2uri(as.raster(bg)),
                  xref = "x",
@@ -174,6 +186,28 @@ server <- function(input, output) {
 
     }
   })
+}
+
+getMap <- function(df) {
+  # Make the color palette s.t. 0 is transparent
+  cols <- hcl.colors(12, "YlOrRd", rev = TRUE, alpha = 0.75)
+  cols[1] <- "#FFFFC800"
+
+  # Generate image
+  plotpng <- tempfile("heatmap", fileext = ".png")
+  png(filename = plotpng, width = 1000, height = 750)
+  
+  par(oma=c(0,0,0,0), mar=c(0,0,0,0))
+  plot(1, type="n", xlab="", ylab="", xlim=c(-100, 100), ylim=c(-42.5, 42.5), axes=FALSE,ann=FALSE, xaxs='i', yaxs='i')
+
+  # Generate a kernel density estimate
+  kd <- MASS::kde2d(df$coordinates_x, df$coordinates_y, n=200, lims=c(-100, 100, -42.5, 42.5))
+  img <- readPNG("images/nhlIceHeat.png")
+  rasterImage(img, -100, -42.5, 100, 42.5)
+  image(kd, col = cols, xaxt='n', yaxt='n', frame.plot=FALSE, ann=FALSE, add = TRUE)
+  dev.off()
+
+  return(plotpng)
 }
 
 shinyApp(ui, server)
