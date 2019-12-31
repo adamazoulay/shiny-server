@@ -21,15 +21,15 @@ ui <- fluidPage(
                    label = 'Select a date range to find games:',
                    start = "2019-09-30", end = "2019-10-03"),
 
-    selectInput("plot_type", "Choose a plot type:",
-                choices = c("Scatter", "Heatmap")),
-
     uiOutput("eventList"),
     width = 3
   ),
 
   mainPanel(
     #h3(textOutput("gameInfo")),
+    checkboxGroupInput("scatter_pts", "Display scatter point markers:",
+                       choices = "Markers"),
+    
     plotlyOutput("plot", width = "100%")
   )
 
@@ -60,9 +60,10 @@ server <- function(input, output) {
   output$plot <- renderPlotly({
 
     team_id <- GetTeamId(input$team_name)
-    gids <- paste(GetGameIdRange(team_id,
-                                 format(input$date_range[1]),
-                                 format(input$date_range[2])), collapse=",")
+    gids_list <- GetGameIdRange(team_id, 
+                                format(input$date_range[1]),
+                                format(input$date_range[2]))
+    gids <- paste(gids_list, collapse=",")
     events_sql <-  paste(input$events, collapse=",")
 
     xaxis <- list(
@@ -84,107 +85,65 @@ server <- function(input, output) {
       fixedrange = TRUE
     )
 
-    if (input$plot_type == "Scatter") {
-      bg <- png::readPNG("images/nhlIce.png")
 
+    if (events_sql[1] == "") {
       event_pts <- QueryDb(paste("SELECT DISTINCT coordinates_x,
-      coordinates_y,
-      result_description,
-      about_period,
-      about_periodTime,
-      game_id,
-      result_event FROM events WHERE team_id=", team_id,
-                                 " AND game_id IN (", gids, ")",
-                                 " AND result_event IN (", events_sql, ")",
-                                 sep=""))
-
-      plot_ly(event_pts, x = ~coordinates_x, y = ~coordinates_y, color= ~result_event,
-              marker = list(size = 10, line = list(color = 'black', width = 2)),
-              text = ~result_event,
-              hovertemplate = ~paste(
-                "<b>%{text}</b><br><br>",
-                result_description,
-                "<br>Game id: ", game_id,
-                "<br>Period: ", about_period,
-                "<br>Time: ", about_periodTime,
-                "<extra></extra>",
-                sep=""
-              )) %>%
-        config(displayModeBar = F) %>%
-        layout(
-          width = 1000,
-          height = 500,
-          xaxis = xaxis,
-          yaxis = yaxis,
-          legend = list(orientation = 'h', y=-42.5),
-          showlegend=TRUE,
-          images = list(
-            list(source = raster2uri(as.raster(bg)),
-                 xref = "x",
-                 yref = "y",
-                 x = -100,
-                 y = 42.5,
-                 sizex = 200,
-                 sizey = 85,
-                 sizing = "stretch",
-                 opacity = 1,
-                 layer = "below"
-            )))
-
-    } else if (input$plot_type == "Heatmap") {
-      
-      if (events_sql[1] == "") {
-        event_pts <- QueryDb(paste("SELECT DISTINCT coordinates_x,
-                            coordinates_y,
-                            result_description,
-                            about_period,
-                            about_periodTime,
-                            game_id,
-                            result_event FROM events WHERE team_id=", team_id,
-                                                         " AND game_id IN (", gids, ")",
-                                                         " AND result_event IN (", events_sql, ")",
-                                                         sep=""))
-        bg <- png::readPNG("images/nhlIceHeat.png")
-      } else {
-        event_pts <- GetHeatmapCoords(team_id, gids, events_sql)
-        map_path <- getMap(event_pts)
-        bg <- png::readPNG(map_path)
-      }
-
-      plot_ly(event_pts, x = ~coordinates_x, y = ~coordinates_y, color= ~result_event,
-              marker = list(size = 10, line = list(color = 'black', width = 2)),
-              text = ~result_event,
-              hovertemplate = ~paste(
-                "<b>%{text}</b><br><br>",
-                result_description,
-                "<br>Game id: ", game_id,
-                "<br>Period: ", about_period,
-                "<br>Time: ", about_periodTime,
-                "<extra></extra>",
-                sep=""
-              )) %>%
-        config(displayModeBar = F) %>%
-        layout(
-          width = 1000,
-          height = 500,
-          xaxis = xaxis,
-          yaxis = yaxis,
-          legend = list(orientation = 'h', y=-42.5),
-          showlegend=TRUE,
-          images = list(
-            list(source = raster2uri(as.raster(bg)),
-                 xref = "x",
-                 yref = "y",
-                 x = -100,
-                 y = 42.5,
-                 sizex = 200,
-                 sizey = 85,
-                 sizing = "stretch",
-                 opacity = 1,
-                 layer = "below"
-            )))
-
+                          coordinates_y,
+                          result_description,
+                          about_period,
+                          about_periodTime,
+                          about_dateTime,
+                          game_id,
+                          result_event FROM events WHERE team_id=", team_id,
+                                                       " AND game_id IN (", gids, ")",
+                                                       " AND result_event IN (", events_sql, ")",
+                                                       sep=""))
+      bg <- png::readPNG("images/nhlIceHeat.png")
+    } else {
+      event_pts <- GetHeatmapCoords(team_id, gids_list, events_sql)
+      map_path <- getMap(event_pts)
+      bg <- png::readPNG(map_path)
     }
+
+    if (!is.null(input$scatter_pts)) {
+      vis <- TRUE
+      leg <- TRUE
+    } else {
+      vis <- FALSE
+      leg <- FALSE
+    }
+    
+    plot_ly(event_pts, x = ~coordinates_x, y = ~coordinates_y, width = 1000, height = 500,
+            color= ~result_event, type = "scatter", mode = "markers", visible = vis,
+            marker = list(size = 10, line = list(color = 'black', width = 2)),
+            text = ~result_event,
+            hovertemplate = ~paste(
+              "<b>%{text}</b><br><br>",
+              result_description,
+              "<br>Game date: ", about_dateTime,
+              "<br>Period: ", about_period,
+              "<br>Time: ", about_periodTime,
+              "<extra></extra>",
+              sep="")) %>%
+      config(displayModeBar = F) %>%
+      layout(
+        xaxis = xaxis,
+        yaxis = yaxis,
+        legend = list(orientation = 'h', y=-42.5),
+        showlegend = leg,
+        images = list(
+          list(source = raster2uri(as.raster(bg)),
+               xref = "x",
+               yref = "y",
+               x = -100,
+               y = 42.5,
+               sizex = 200,
+               sizey = 85,
+               sizing = "stretch",
+               opacity = 1,
+               layer = "below"
+          )))
+    
   })
 }
 
